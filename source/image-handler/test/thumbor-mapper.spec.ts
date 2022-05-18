@@ -994,4 +994,5 @@ describe('mapFilter()', () => {
       expect(edits).toEqual(expectedResult.edits);
     })
   })
+
 });

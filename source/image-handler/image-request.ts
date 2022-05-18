@@ -228,7 +228,7 @@ export class ImageRequest {
    * @returns The name of the appropriate Amazon S3 key.
    */
   public parseImageKey(event: ImageHandlerEvent, requestType: RequestTypes): string {
-    const { ENABLE_SIGNATURE } = process.env;
+    const { ENABLE_SIGNATURE, THUMBOR_PATH } = process.env;
 
     if (requestType === RequestTypes.DEFAULT) {
       // Decode the image request and return the image key
@@ -259,9 +259,15 @@ export class ImageRequest {
       if (ENABLE_SIGNATURE && requestType === RequestTypes.THUMBOR) {
         //Clear out the signature from the thumbor path
         path = path.replace(/(?:[A-Za-z0-9-_]{4})*(?:[A-Za-z0-9-_]{2}==|[A-Za-z0-9-_]{3}=)/g, '');
+        //append the implicit
+
       }
 
       path = path.replace(/^\/+/, '');
+
+      if (requestType === RequestTypes.THUMBOR && THUMBOR_PATH ) {
+        path = `${THUMBOR_PATH}/${path}`;
+      }
 
       return decodeURIComponent(path);
     }

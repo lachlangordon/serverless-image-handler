@@ -1390,6 +1390,23 @@ describe('parseImageKey()', () => {
       const expectedResult = 'thumbor-image.jpg';
       expect(result).toEqual(expectedResult);
     });
+
+    it('Should pass if a custom thumbor path is provided and the key value is a valid thumbor request format', () => {
+
+      process.env = { THUMBOR_PATH: 'images' };
+
+      // Arrange
+      const event = { path: '/filters:rotate(90)/filters:grayscale()/thumbor-image.jpg' };
+
+      // Act
+      const imageRequest = new ImageRequest(s3Client, secretProvider);
+      const result = imageRequest.parseImageKey(event, RequestTypes.THUMBOR);
+
+      // Assert
+      const expectedResult = 'images/thumbor-image.jpg';
+      expect(result).toEqual(expectedResult);
+
+    });
   });
 
   describe('004/thumborRequestType/withParenthesesRequest', () => {

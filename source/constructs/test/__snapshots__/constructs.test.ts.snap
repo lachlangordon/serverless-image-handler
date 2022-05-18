@@ -1146,6 +1146,7 @@ Object {
             "SOURCE_BUCKETS": Object {
               "Ref": "SourceBucketsParameter",
             },
+            "THUMBOR_PATH": "",
           },
         },
         "Handler": "image-handler/index.handler",
