@@ -4,7 +4,7 @@
 import Color from 'color';
 import ColorName from 'color-name';
 
-import { ImageEdits, ImageFitTypes, ImageFormatTypes } from './lib';
+import {ImageEdits, ImageFitTypes, ImageFormatTypes, ImageHandlerError, StatusCodes} from './lib';
 
 export class ThumborMapper {
   private static readonly EMPTY_IMAGE_EDITS: ImageEdits = {};
@@ -18,7 +18,7 @@ export class ThumborMapper {
   public mapPathToEdits(path: string): ImageEdits {
     const fileFormat = path.substr(path.lastIndexOf('.') + 1) as ImageFormatTypes;
 
-    let edits: ImageEdits = this.mergeEdits(this.mapCrop(path), this.mapResize(path), this.mapFitIn(path));
+    let edits: ImageEdits = this.mergeEdits(this.mapCrop(path), this.mapResize(path), this.mapFitIn(path), this.mapSmart(path));
 
     // parse the image path. we have to sort here to make sure that when we have a file name without extension,
     // and `format` and `quality` filters are passed, then the `format` filter will go first to be able
@@ -335,6 +335,16 @@ export class ThumborMapper {
    */
   private mapFitIn(path: string): ImageEdits {
     return path.includes('fit-in') ? { resize: { fit: ImageFitTypes.INSIDE } } : ThumborMapper.EMPTY_IMAGE_EDITS;
+  }
+
+  /**
+   * Maps thumbor smart crop path to image edit. Currently doesn't do anything to avoid invoking Rekognition for lots of legacy assets
+   * @param path An image path.
+   * @returns empty edits.
+   */
+  private mapSmart(path: string): ImageEdits {
+    // return path.includes('smart') ? { edits: { smartCrop: true } } : ThumborMapper.EMPTY_IMAGE_EDITS;
+    return ThumborMapper.EMPTY_IMAGE_EDITS;
   }
 
   /**

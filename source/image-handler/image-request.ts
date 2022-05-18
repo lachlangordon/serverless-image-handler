@@ -2,11 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import S3 from 'aws-sdk/clients/s3';
-import { createHmac } from 'crypto';
+import {createHmac} from 'crypto';
 
-import { DefaultImageRequest, ImageEdits, ImageFormatTypes, ImageHandlerError, ImageHandlerEvent, ImageRequestInfo, Headers, RequestTypes, StatusCodes } from './lib';
-import { SecretProvider } from './secret-provider';
-import { ThumborMapper } from './thumbor-mapper';
+import {
+  DefaultImageRequest,
+  Headers,
+  ImageEdits,
+  ImageFormatTypes,
+  ImageHandlerError,
+  ImageHandlerEvent,
+  ImageRequestInfo,
+  RequestTypes,
+  StatusCodes
+} from './lib';
+import {SecretProvider} from './secret-provider';
+import {ThumborMapper} from './thumbor-mapper';
 
 type OriginalImageInfo = Partial<{
   contentType: string;
@@ -28,11 +38,12 @@ export class ImageRequest {
    */
   public async setup(event: ImageHandlerEvent): Promise<ImageRequestInfo> {
     try {
-      await this.validateRequestSignature(event);
 
+      //To know what kind of signature we're gonna accept
       let imageRequestInfo: ImageRequestInfo = <ImageRequestInfo>{};
-
       imageRequestInfo.requestType = this.parseRequestType(event);
+      await this.validateRequestSignature(event, imageRequestInfo.requestType);
+
       imageRequestInfo.bucket = this.parseImageBucket(event, imageRequestInfo.requestType);
       imageRequestInfo.key = this.parseImageKey(event, imageRequestInfo.requestType);
       imageRequestInfo.edits = this.parseImageEdits(event, imageRequestInfo.requestType);
@@ -217,6 +228,8 @@ export class ImageRequest {
    * @returns The name of the appropriate Amazon S3 key.
    */
   public parseImageKey(event: ImageHandlerEvent, requestType: RequestTypes): string {
+    const { ENABLE_SIGNATURE } = process.env;
+
     if (requestType === RequestTypes.DEFAULT) {
       // Decode the image request and return the image key
       const { key } = this.decodeRequest(event);
@@ -241,7 +254,16 @@ export class ImageRequest {
         }
       }
 
-      return decodeURIComponent(path.replace(/\/\d+x\d+:\d+x\d+\/|(?<=\/)\d+x\d+\/|filters:[^/]+|\/fit-in(?=\/)|^\/+/g, '').replace(/^\/+/, ''));
+      path = path.replace(/\/\d+x\d+:\d+x\d+\/|(?<=\/)\d+x\d+\/|filters:[^/]+|\/fit-in(?=\/)|smart\/|^\/+/g, '');
+
+      if (ENABLE_SIGNATURE && requestType === RequestTypes.THUMBOR) {
+        //Clear out the signature from the thumbor path
+        path = path.replace(/(?:[A-Za-z0-9-_]{4})*(?:[A-Za-z0-9-_]{2}==|[A-Za-z0-9-_]{3}=)/g, '');
+      }
+
+      path = path.replace(/^\/+/, '');
+
+      return decodeURIComponent(path);
     }
 
     // Return an error for all other conditions
@@ -363,7 +385,7 @@ export class ImageRequest {
    * @param requestType The request type.
    * @returns The output format.
    */
-  public getOutputFormat(event: ImageHandlerEvent, requestType: RequestTypes = undefined): ImageFormatTypes {
+  public getOutputFormat(event: ImageHandlerEvent, requestType: RequestTypes): ImageFormatTypes {
     const { AUTO_WEBP } = process.env;
 
     if (AUTO_WEBP === 'Yes' && event.headers.Accept && event.headers.Accept.includes('image/webp')) {
@@ -412,34 +434,70 @@ export class ImageRequest {
    * @returns A promise.
    * @throws Throws the error if validation is enabled and the provided signature is invalid.
    */
-  private async validateRequestSignature(event: ImageHandlerEvent): Promise<void> {
+  private async validateRequestSignature(event: ImageHandlerEvent, requestType: RequestTypes): Promise<void> {
     const { ENABLE_SIGNATURE, SECRETS_MANAGER, SECRET_KEY } = process.env;
 
     // Checks signature enabled
     if (ENABLE_SIGNATURE === 'Yes') {
-      const { path, queryStringParameters } = event;
 
-      if (!queryStringParameters?.signature) {
-        throw new ImageHandlerError(StatusCodes.BAD_REQUEST, 'AuthorizationQueryParametersError', 'Query-string requires the signature parameter.');
-      }
+      if (requestType === RequestTypes.THUMBOR) {
+        const { path } = event;
 
-      try {
-        const { signature } = queryStringParameters;
-        const secret = JSON.parse(await this.secretProvider.getSecret(SECRETS_MANAGER));
-        const key = secret[SECRET_KEY];
-        const hash = createHmac('sha256', key).update(path).digest('hex');
+          const signatureMatchResult = path.match(/(?:[A-Za-z0-9-_]{4})*(?:[A-Za-z0-9-_]{2}==|[A-Za-z0-9-_]{3}=)/g);
 
-        // Signature should be made with the full path.
-        if (signature !== hash) {
-          throw new ImageHandlerError(StatusCodes.FORBIDDEN, 'SignatureDoesNotMatch', 'Signature does not match.');
+          if (!signatureMatchResult) {
+              throw new ImageHandlerError(StatusCodes.BAD_REQUEST, 'AuthorizationPathError', 'Path requires a signature component.')
+          }
+
+          try {
+            const signature = signatureMatchResult[0];
+            const secret = JSON.parse(await this.secretProvider.getSecret(SECRETS_MANAGER));
+            const key = secret[SECRET_KEY];
+            const operationalPath = path.replace(/^\/(?:[A-Za-z0-9-_]{4})*(?:[A-Za-z0-9-_]{2}==|[A-Za-z0-9-_]{3}=)\/?/g, '');
+
+            //Do our own base64url conversion
+            const hash = createHmac('sha1', key).update(operationalPath).digest('base64').replace(/\+/g, '-').replace(/\//g, '_');
+
+            if (signature !== hash) {
+              throw new ImageHandlerError(StatusCodes.FORBIDDEN, 'SignatureDoesNotMatch', 'Signature does not match.');
+            }
+          } catch (error) {
+            if (error.code === 'SignatureDoesNotMatch') {
+              throw error;
+            }
+
+            console.error('Error occurred while checking signature.', error);
+            throw new ImageHandlerError(StatusCodes.INTERNAL_SERVER_ERROR, 'SignatureValidationFailure', 'Signature validation failed.');
+          }
+
+
+      } else {
+
+        const { path, queryStringParameters } = event;
+
+        if (!queryStringParameters?.signature) {
+          throw new ImageHandlerError(StatusCodes.BAD_REQUEST, 'AuthorizationQueryParametersError', 'Query-string requires the signature parameter.');
         }
-      } catch (error) {
-        if (error.code === 'SignatureDoesNotMatch') {
-          throw error;
+
+        try {
+          const { signature } = queryStringParameters;
+          const secret = JSON.parse(await this.secretProvider.getSecret(SECRETS_MANAGER));
+          const key = secret[SECRET_KEY];
+          const hash = createHmac('sha256', key).update(path).digest('hex');
+
+          // Signature should be made with the full path.
+          if (signature !== hash) {
+            throw new ImageHandlerError(StatusCodes.FORBIDDEN, 'SignatureDoesNotMatch', 'Signature does not match.');
+          }
+        } catch (error) {
+          if (error.code === 'SignatureDoesNotMatch') {
+            throw error;
+          }
+
+          console.error('Error occurred while checking signature.', error);
+          throw new ImageHandlerError(StatusCodes.INTERNAL_SERVER_ERROR, 'SignatureValidationFailure', 'Signature validation failed.');
         }
 
-        console.error('Error occurred while checking signature.', error);
-        throw new ImageHandlerError(StatusCodes.INTERNAL_SERVER_ERROR, 'SignatureValidationFailure', 'Signature validation failed.');
       }
     }
   }

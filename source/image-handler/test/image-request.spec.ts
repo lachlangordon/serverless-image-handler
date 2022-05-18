@@ -434,6 +434,52 @@ describe('setup()', () => {
       expect(imageRequestInfo).toEqual(expectedResult);
     });
 
+    it('Should pass when the image signature for Thumbor request is correct', async () => {
+      const event = {
+        path: '/QIYO1RV4wFqcd4oLwrFS4vlGlrM=/400x300/test-image-001.jpg'
+      };
+
+      // Mock
+      mockAwsS3.getObject.mockImplementationOnce(() => ({
+        promise() {
+          return Promise.resolve({ Body: Buffer.from('SampleImageContent\n') });
+        }
+      }));
+      mockAwsSecretManager.getSecretValue.mockImplementationOnce(() => ({
+        promise() {
+          return Promise.resolve({
+            SecretString: JSON.stringify({
+              [process.env.SECRET_KEY]: 'secret'
+            })
+          });
+        }
+      }));
+
+      // Act
+      const imageRequest = new ImageRequest(s3Client, secretProvider);
+      const imageRequestInfo = await imageRequest.setup(event);
+      const expectedResult = {
+        requestType: 'Thumbor',
+        bucket: 'validBucket',
+        key: 'test-image-001.jpg',
+        edits: {
+          resize: {
+            width: 400,
+            height: 300
+          }
+        },
+        originalImage: Buffer.from('SampleImageContent\n'),
+        cacheControl: 'max-age=31536000,public',
+        contentType: 'image',
+        headers: undefined
+      };
+
+      // Assert
+      expect(mockAwsS3.getObject).toHaveBeenCalledWith({ Bucket: 'validBucket', Key: 'test-image-001.jpg' });
+      expect(mockAwsSecretManager.getSecretValue).toHaveBeenCalledWith({ SecretId: process.env.SECRETS_MANAGER });
+      expect(imageRequestInfo).toEqual(expectedResult);
+    });
+
     it('Should throw an error when queryStringParameters are missing', async () => {
       // Arrange
       const event = {
@@ -450,6 +496,26 @@ describe('setup()', () => {
           status: StatusCodes.BAD_REQUEST,
           code: 'AuthorizationQueryParametersError',
           message: 'Query-string requires the signature parameter.'
+        });
+      }
+    });
+
+    it('Should throw an error when Thumbor key in path is missing', async () => {
+      // Arrange
+      const event = {
+        path: '/400x300/test-image-001.jpg'
+      };
+
+      // Act
+      const imageRequest = new ImageRequest(s3Client, secretProvider);
+      try {
+        await imageRequest.setup(event);
+      } catch (error) {
+        // Assert
+        expect(error).toMatchObject({
+          status: StatusCodes.BAD_REQUEST,
+          code: 'AuthorizationPathError',
+          message: 'Path requires a signature component.'
         });
       }
     });
@@ -509,6 +575,38 @@ describe('setup()', () => {
         });
       }
     });
+
+    it('Should throw an error when signature does not match in Thumbor request', async() => {
+      //Arrange
+      const event = {
+        path: '/zzz8NYuxuXdOkJIEYYFPchjQs-s=/400x300/test-image-001.jpg'
+      }
+
+      // Mock
+      mockAwsSecretManager.getSecretValue.mockImplementationOnce(() => ({
+        promise() {
+          return Promise.resolve({
+            SecretString: JSON.stringify({
+              [process.env.SECRET_KEY]: 'secret'
+            })
+          });
+        }
+      }));
+
+      // Act
+      const imageRequest = new ImageRequest(s3Client, secretProvider);
+      try {
+        await imageRequest.setup(event);
+      } catch (error) {
+        // Assert
+        expect(mockAwsSecretManager.getSecretValue).toHaveBeenCalledWith({ SecretId: process.env.SECRETS_MANAGER });
+        expect(error).toMatchObject({
+          status: 403,
+          message: 'Signature does not match.',
+          code: 'SignatureDoesNotMatch'
+        });
+      }
+    })
 
     it('Should throw an error when any other error occurs', async () => {
       // Arrange
@@ -1750,7 +1848,8 @@ describe('getOutputFormat()', () => {
 
       // Act
       const imageRequest = new ImageRequest(s3Client, secretProvider);
-      const result = imageRequest.getOutputFormat(event);
+      const requestType = imageRequest.parseRequestType(event);
+      const result = imageRequest.getOutputFormat(event, requestType);
 
       // Assert
       expect(result).toEqual('webp');
@@ -1769,7 +1868,8 @@ describe('getOutputFormat()', () => {
 
       // Act
       const imageRequest = new ImageRequest(s3Client, secretProvider);
-      const result = imageRequest.getOutputFormat(event);
+      const requestType = imageRequest.parseRequestType(event);
+      const result = imageRequest.getOutputFormat(event, requestType);
 
       // Assert
       expect(result).toBeNull();
@@ -1788,7 +1888,8 @@ describe('getOutputFormat()', () => {
 
       // Act
       const imageRequest = new ImageRequest(s3Client, secretProvider);
-      const result = imageRequest.getOutputFormat(event);
+      const requestType = imageRequest.parseRequestType(event);
+      const result = imageRequest.getOutputFormat(event,requestType);
 
       // Assert
       expect(result).toBeNull();
@@ -1806,7 +1907,8 @@ describe('getOutputFormat()', () => {
 
       // Act
       const imageRequest = new ImageRequest(s3Client, secretProvider);
-      const result = imageRequest.getOutputFormat(event);
+      const requestType = imageRequest.parseRequestType(event);
+      const result = imageRequest.getOutputFormat(event, requestType);
 
       // Assert
       expect(result).toBeNull();

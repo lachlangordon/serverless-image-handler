@@ -972,4 +972,26 @@ describe('mapFilter()', () => {
       expect(edits).toEqual(expectedResult);
     });
   });
+
+  describe('037/smart', () => {
+    it('Should pass if smart path is ignored', () => {
+      // Arrange
+      const path = '/400x300/smart/test-image-001.jpg';
+
+      // Act
+      const thumborMapper = new ThumborMapper();
+      const edits = thumborMapper.mapPathToEdits(path);
+
+      // Assert
+      const expectedResult = {
+        edits: {
+          resize: {
+            width: 400,
+            height: 300
+          }
+        }
+      };
+      expect(edits).toEqual(expectedResult.edits);
+    })
+  })
 });

@@ -5,6 +5,7 @@ import sharp from 'sharp';
 
 import { ImageFormatTypes, RequestTypes, StatusCodes } from './enums';
 import { Headers, ImageEdits } from './types';
+import {BinaryToTextEncoding} from "crypto";
 
 export interface ImageHandlerEvent {
   path?: string;
