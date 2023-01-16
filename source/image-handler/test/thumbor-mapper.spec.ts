@@ -162,7 +162,26 @@ describe('process()', () => {
     });
   });
 
-  describe('008/crop', () => {
+  decribe('008/resize/orig', () => {
+    it('Should pass if orig is accepted as a size parameter and be ignored', () => {
+      //Arrange
+      const path = '/origxorig/test-image-001.jpg';
+
+      //Act
+      const thumborMapper = new ThumborMapper();
+      const edits = thumborMapper.mapPathToEdits(path);
+
+      //Assert
+      const expectedResult = {
+        edits: {
+          resize: {}
+        }
+      };
+      expect(edits).toEqual(expectedResult.edits);
+    });
+  });
+
+  describe('009/crop', () => {
     it('Should pass if the proper crop is applied', () => {
       // Arrange
       const path = '/10x0:100x200/test-image-001.jpg';
@@ -224,7 +243,7 @@ describe('process()', () => {
     });
   });
 
-  describe('009/noFileExtension', () => {
+  describe('010/noFileExtension', () => {
     it('Should pass when format and quality filters are passed and file does not have extension', () => {
       // Arrange
       const path = '/filters:format(jpeg)/filters:quality(50)/image_without_extension';
